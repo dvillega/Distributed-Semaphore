@@ -12,8 +12,11 @@ import (
     "time"
 )
 
+var sendChan chan Message
+
 // Helper Process
 func Handler(helpChan chan Message, okToUse chan bool, myID int) {
+    // Logical Clock
     helperLC := 0
     hosts, err := readLines(os.Args[1])
     if err != nil {
@@ -32,11 +35,13 @@ func Handler(helpChan chan Message, okToUse chan bool, myID int) {
 
     msgQueue := NewMessageQueue(100)
 
-    sendConn := make([]net.Conn, numHosts - 1)
-    rcvConn  := make([]net.Conn, numHosts - 1)
+    sendConn := make([]net.Conn, numHosts)
+    rcvConn  := make([]net.Conn, numHosts)
 
-    sendList := make([]*gob.Encoder, numHosts - 1)
-    rcvList := make([]*gob.Decoder, numHosts - 1)
+    sendList := make([]*gob.Encoder, numHosts)
+    rcvList := make([]*gob.Decoder, numHosts)
+
+    sendChan = make(chan Message)
 
     seenHost := false
 
@@ -69,6 +74,9 @@ func Handler(helpChan chan Message, okToUse chan bool, myID int) {
         sendList[n] = gob.NewEncoder(sendConn[n])
         check(err)
     }
+
+    go receive(rcvList)
+
     okToUse <- true
     startMsg := Message{Sender:myID, Kind:"ACK", Timestamp:-1}
     broadcast(sendList, startMsg)
@@ -141,23 +149,31 @@ func broadcast(sendList []*gob.Encoder, msg Message) {
     }
 }
 
-func receiveMsg(rcvList []*gob.Decoder, sendList []*gob.Encoder, msgQueue *MessageQueue, helperLC int, myID int) {
+func receiveMsg(sendList []*gob.Encoder, msgQueue *MessageQueue, helperLC int, myID int) {
+    fmt.Println("Receiving Messages")
+    foo := <- helpChan
+    fmt.Println("Pulled foo from helpChan")
+    fmt.Print(foo)
+    fmt.Println(" is being Received")
     ack := Message{Sender:myID, Kind:"ACK", Timestamp:helperLC}
     helperLC++
-    fmt.Println("Receiving Messages")
-    var foo Message
+    fmt.Println("Sending ACK")
+    // SEND ACK
+    }
+}
+
+func receive(rcvList []*gob.Decoder) {
     for ndx,_ := range rcvList {
-        fmt.Println(len(rcvList))
-        fmt.Print(ndx)
-        fmt.Println(" is being Received")
-        err := rcvList[ndx].Decode(&foo)
-        if err != nil || err != io.EOF {
-            fmt.Println(foo)
-            msgQueue.Append(foo)
-        }
-        fmt.Print(ndx)
-        fmt.Println(" is done Received")
-        fmt.Println("Sending ACK")
-        sendList[ndx].Encode(ack)
+        go func() {
+            for {
+                var foo Message
+                err := rcvList[ndx].Decode(&foo)
+                if err != nil || err != io.EOF {
+                    fmt.Println("Go Func rcvd")
+                    fmt.Println(foo)
+                    helpChan <- foo
+                }
+            }
+        }()
     }
 }
