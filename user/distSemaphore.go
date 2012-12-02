@@ -4,7 +4,7 @@ import (
 	"UNO6401/helper"
 	"fmt"
 	"os"
-	"time"
+        "time"
 )
 
 var helpChan chan helper.Message
@@ -33,8 +33,11 @@ func main() {
 
 	check(err)
 
+        var trash string
+        fmt.Scanf("%s",&trash)
+
 	go helper.Handler(helpChan, myID, hosts, okToUse)
-	time.Sleep(time.Second * 3)
+        time.Sleep(time.Second * 3)
 
 	userlc := 0
 
