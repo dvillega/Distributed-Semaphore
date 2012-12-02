@@ -3,31 +3,41 @@ package main
 import (
     "fmt"
     "os"
-    "strconv"
     "time"
     "UNO6401/helper" 
 )
 
 
 var helpChan chan helper.Message
-var okToUse chan bool
+var okToUse chan int
+var userlc int
+var myID int
 
 func main() {
-    helpChan = make(chan helper.Message, 10)
-    okToUse = make(chan bool)
-    if len(os.Args) != 4 {
-        fmt.Println("Usage: " + os.Args[0] + " fileToRead PortListen ID")
+    helpChan = make(chan helper.Message, 20)
+    okToUse = make(chan int)
+    if len(os.Args) != 3 {
+        fmt.Println("Usage: " + os.Args[0] + " fileToRead PortListen")
         os.Exit(1)
     }
     
-    myID, err := strconv.Atoi(os.Args[3])
+    hosts, err := helper.ReadLines(os.Args[1])
+    if err != nil {
+        fmt.Println("Fatal Err:" + err.Error())
+        os.Exit(1)
+    }
+    for pos,val := range hosts {
+        if val == os.Args[2] {
+            myID = pos
+        }
+    }
+
     check(err)
 
-    go helper.Handler(helpChan, okToUse, myID)
-    <-okToUse
+    go helper.Handler(helpChan, myID, hosts, okToUse)
     time.Sleep(time.Second * 3)
 
-    lc := 0
+    userlc := 0
 
     for {
         helper.Prompt()
@@ -35,15 +45,21 @@ func main() {
         fmt.Scanf("%s",&cmd)
         if cmd == "v" || cmd == "V" {
             fmt.Println("V Command Issued")
-            msg := helper.Message{Sender:myID, Kind:"V_op", Timestamp:lc}
+            msg := helper.Message{Sender:myID, Kind:"reqV", Timestamp:userlc}
             helpChan <- msg
-            lc = lc + 1
+            userlc++
         } else if cmd == "p" || cmd == "P" {
             fmt.Println("P Command Issued")
-            msg := helper.Message{Sender:myID, Kind:"P_op", Timestamp:lc}
-            lc = lc + 1
+            msg := helper.Message{Sender:myID, Kind:"reqP", Timestamp:userlc}
+            userlc++
             helpChan <- msg
-            <-okToUse
+            fmt.Println("Waiting on P")
+            ts := <-okToUse
+            if ts + 1 > userlc {
+                userlc = ts + 1
+            }
+            userlc++
+            fmt.Println("Done Waiting on P")
         } else if cmd == "q" || cmd == "Q" {
             fmt.Println("Thank you!")
             close(helpChan)

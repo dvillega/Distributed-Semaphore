@@ -6,23 +6,22 @@ import (
     "fmt"
     "encoding/gob"
     "io"
-    "os"
     "net"
-    "strconv"
+    "os"
     "time"
 )
 
-var sendChan chan Message
+var s int
+var msgQP *MessageQueue
+var msgQV *MessageQueue
+var wa *WatermarkArray
+var setup bool
 
 // Helper Process
-func Handler(helpChan chan Message, okToUse chan bool, myID int) {
+func Handler(helpChan chan Message, myID int, hosts []string, okToUse chan int) {
     // Logical Clock
-    helperLC := 0
-    hosts, err := readLines(os.Args[1])
-    if err != nil {
-        fmt.Println("Fatal Err:" + err.Error())
-        os.Exit(1)
-    }
+    LC := new(int)
+    *LC = 0
     numHosts := len(hosts)
     fmt.Print("Number of Hosts:")
     fmt.Println(numHosts)
@@ -33,67 +32,29 @@ func Handler(helpChan chan Message, okToUse chan bool, myID int) {
     listener, err := net.ListenTCP("tcp", tcpAddr)
     check(err)
 
-    msgQueue := NewMessageQueue(100)
+    msgQP = NewMessageQueue(100)
+    msgQV = NewMessageQueue(100)
+    wa = NewWMA(numHosts)
 
-    sendConn := make([]net.Conn, numHosts)
-    rcvConn  := make([]net.Conn, numHosts)
+    sendConn := make([]*net.Conn, numHosts)
+    rcvConn  := make([]*net.Conn, numHosts)
 
     sendList := make([]*gob.Encoder, numHosts)
     rcvList := make([]*gob.Decoder, numHosts)
 
-    sendChan = make(chan Message)
+    go initRcv(rcvConn, rcvList, hosts, listener)
+    go initSend(sendConn, sendList, hosts)
 
-    seenHost := false
-
-    for n := 0; n < len(hosts); n++ {
-        fmt.Println("Host" + strconv.Itoa(n) + " " + hosts[n])
-        x := n
-        if hosts[n] == service {
-            seenHost = true
-        }
-
-        if seenHost {
-            x = n - 1
-        }
-        if hosts[n] != service {
-            sendConn[x], err = net.Dial("tcp", hosts[n])
-            fmt.Println("Connecting to Host:" + hosts[n])
-            for err != nil {
-                sendConn[x], err = net.Dial("tcp", hosts[n])
-            }
-        } 
+    for !setup {
+        time.Sleep(time.Second)
     }
+    go receive(rcvList, helpChan)
 
-    time.Sleep(time.Second * 3)
-
-    for n := 0; n < len(hosts) - 1; n++ {
-        rcvConn[n],err = listener.Accept()
-        check(err)
-        rcvList[n] = gob.NewDecoder(rcvConn[n])
-        check(err)
-        sendList[n] = gob.NewEncoder(sendConn[n])
-        check(err)
-    }
-
-    go receive(rcvList)
-
-    okToUse <- true
-    startMsg := Message{Sender:myID, Kind:"ACK", Timestamp:-1}
-    broadcast(sendList, startMsg)
     for {
-            receiveMsg(rcvList, sendList, msgQueue, helperLC, myID)
-            fmt.Println("Done Receiving Messages")
-            msg, ok:= <-helpChan
-            fmt.Println("Host:" + service + " OK:" + strconv.FormatBool(ok))
-            if ok {
-                if msg.Kind == "P_op" {
-                    broadcast(sendList, msg)
-                    time.Sleep(time.Second * 2)
-                    okToUse <- true
-                } else {
-                    broadcast(sendList, msg)
-                }
-            }
+            receiveMsg(sendList, LC, myID, helpChan, okToUse)
+            fmt.Print(myID)
+            fmt.Print(" is done rcv: LC=")
+            fmt.Println(*LC)
     }
 }
 
@@ -106,7 +67,7 @@ func Prompt() {
 }
 
 // Read all info from config 
-func readLines(path string) (lines []string, err error) {
+func ReadLines(path string) (lines []string, err error) {
     var (
         file *os.File
         part []byte
@@ -149,26 +110,50 @@ func broadcast(sendList []*gob.Encoder, msg Message) {
     }
 }
 
-func receiveMsg(sendList []*gob.Encoder, msgQueue *MessageQueue, helperLC int, myID int) {
-    fmt.Println("Receiving Messages")
+func receiveMsg(sendList []*gob.Encoder, LC *int, myID int, helpChan chan Message, okToUse chan int) {
     foo := <- helpChan
-    fmt.Println("Pulled foo from helpChan")
     fmt.Print(foo)
     fmt.Println(" is being Received")
-    ack := Message{Sender:myID, Kind:"ACK", Timestamp:helperLC}
-    helperLC++
-    fmt.Println("Sending ACK")
-    // SEND ACK
+    if foo.Timestamp + 1 > *LC {
+        *LC = foo.Timestamp + 1
     }
+    *LC++
+    bar := foo.Kind
+    switch bar {
+        case "reqP":
+            reqP := Message{Sender:myID, Kind:"POP", Timestamp:*LC}
+            broadcast(sendList, reqP)
+            *LC++
+        case "reqV":
+            reqV := Message{Sender:myID, Kind:"VOP", Timestamp:*LC}
+            broadcast(sendList, reqV)
+            *LC++
+        case "POP":
+            ack := Message{Sender:myID, Kind:"ACK", Timestamp:*LC}
+            msgQP.Append(foo)
+            broadcast(sendList, ack)
+            *LC++
+        case "VOP":
+            ack := Message{Sender:myID, Kind:"ACK", Timestamp:*LC}
+            msgQV.Append(foo)
+            broadcast(sendList, ack)
+            *LC++
+        case "ACK":
+            handleACK(foo, okToUse, myID, LC)
+    }
+    fmt.Print("msgQV ")
+    fmt.Println(msgQV)
+    fmt.Print("msgQP ")
+    fmt.Println(msgQP)
 }
 
-func receive(rcvList []*gob.Decoder) {
+func receive(rcvList []*gob.Decoder, helpChan chan Message) {
     for ndx,_ := range rcvList {
         go func() {
             for {
                 var foo Message
                 err := rcvList[ndx].Decode(&foo)
-                if err != nil || err != io.EOF {
+                if err == nil {
                     fmt.Println("Go Func rcvd")
                     fmt.Println(foo)
                     helpChan <- foo
@@ -176,4 +161,51 @@ func receive(rcvList []*gob.Decoder) {
             }
         }()
     }
+}
+
+func handleACK(msg Message, okToUse chan int, myID int, LC *int) {
+    wa.Update(msg)
+    FAVmsg := msgQV.FullyAck(wa.FullyAck())
+    for _,val := range FAVmsg {
+        msgQV.Remove(val)
+        s = s + 1
+    }
+    FAPmsg := msgQP.FullyAck(wa.FullyAck())
+    for _,val := range FAPmsg {
+        if s > 0 {
+            msgQP.Remove(val)
+            s = s - 1
+            if val.Sender == myID {
+                okToUse <- *LC
+                *LC++
+            }
+        }
+    }
+}
+
+func initRcv(rcvConn []*net.Conn, rcvList []*gob.Decoder, hosts []string, listener net.Listener) {
+    for n,_ := range hosts {
+        var err error
+        val,err := listener.Accept()
+        check(err)
+        rcvConn[n] = &val
+        rcvList[n] = gob.NewDecoder(*rcvConn[n])
+        check(err)
+    }
+} 
+
+func initSend(sendConn []*net.Conn, sendList []*gob.Encoder, hosts []string){
+    for n,_ := range hosts {
+        var err error
+        var val net.Conn
+        val, err = net.Dial("tcp", hosts[n])
+        for err != nil {
+            val, err = net.Dial("tcp", hosts[n])
+        }
+        sendConn[n] = &val
+        fmt.Println("Connected to Host:" + hosts[n])
+        sendList[n] = gob.NewEncoder(*sendConn[n])
+        check(err)
+    }
+    setup = true
 }
