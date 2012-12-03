@@ -1,6 +1,7 @@
 package helper
 
 import (
+        "fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,6 +106,8 @@ func (base *MessageQueue) FullyAck(lc int) []Message {
 
 // String Return
 func (base *MessageQueue) String() string {
+        fmt.Print("Size of MQ:")
+        fmt.Println(base.Size())
 	foo := make([]string, 0, len(base.MQueue))
 	for _, val := range base.MQueue {
 		foo = append(foo, val.String())

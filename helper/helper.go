@@ -148,33 +148,53 @@ func receiveMsg(sendList []*gob.Encoder, LC *int, myID int, helpChan chan Messag
 
 func receive(rcvList []*gob.Decoder, helpChan chan Message) {
 	for ndx, _ := range rcvList {
-		go func() {
-			for {
-				var foo Message
-				err := rcvList[ndx].Decode(&foo)
-				if err == nil {
-					fmt.Print("Go Func rcvd:")
-					fmt.Println(foo)
-					helpChan <- foo
-				}
-			}
-		}()
-	}
+		go receivePerConn(rcvList[ndx], helpChan)
+        }
+}
+
+func receivePerConn(receiver *gob.Decoder, helpChan chan Message) {
+    for {
+        var foo Message
+        err := receiver.Decode(&foo)
+        if err == nil {
+            fmt.Print("Go Func Received:")
+            fmt.Println(foo)
+            helpChan <- foo
+        }
+    }
 }
 
 func handleACK(msg Message, okToUse chan int, myID int, LC *int, s *int) {
 	wa.Update(msg)
+        fmt.Print("Handling ACK of")
+        fmt.Println(msg)
+        fmt.Print("S val is :")
+        fmt.Println(*s)
 	FAVmsg := msgQV.FullyAck(wa.FullyAck())
 	for _, val := range FAVmsg {
+                fmt.Print("Removing ")
+                fmt.Println(val)
 		msgQV.Remove(val)
 		*s = *s + 1
+                fmt.Print("S is now:")
+                fmt.Println(*s)
 	}
 	FAPmsg := msgQP.FullyAck(wa.FullyAck())
 	for _, val := range FAPmsg {
+                fmt.Print("Fully Ack'd P:")
+                fmt.Println(val)
+                fmt.Print("S is now:")
+                fmt.Println(*s)
 		if *s > 0 {
+                        fmt.Print("Removing ")
+                        fmt.Println(val)
 			msgQP.Remove(val)
 			*s = *s - 1
+                        fmt.Print("S is now:")
+                        fmt.Println(*s)
 			if val.Sender == myID {
+                                fmt.Print(myID)
+                                fmt.Println(" is now okToUse")
 				okToUse <- *LC
 				*LC++
 			}

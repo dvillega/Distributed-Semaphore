@@ -2,6 +2,7 @@ package helper
 
 import "strconv"
 import "strings"
+import "fmt"
 
 type WatermarkArray struct {
 	LCval []int
@@ -19,6 +20,8 @@ func (WA *WatermarkArray) FullyAck() int {
 			foo = elem
 		}
 	}
+        fmt.Print(foo)
+        fmt.Println(" Has been fully Ack'd")
 	return foo
 }
 

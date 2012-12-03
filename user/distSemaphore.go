@@ -14,7 +14,7 @@ var myID int
 
 func main() {
 	helpChan = make(chan helper.Message, 20)
-	okToUse = make(chan int)
+	okToUse = make(chan int,2)
 	if len(os.Args) != 3 {
 		fmt.Println("Usage: " + os.Args[0] + " fileToRead PortListen")
 		os.Exit(1)
@@ -37,7 +37,7 @@ func main() {
         fmt.Scanf("%s",&trash)
 
 	go helper.Handler(helpChan, myID, hosts, okToUse)
-        time.Sleep(time.Second * 3)
+        time.Sleep(time.Second * 10)
 
 	userlc := 0
 
